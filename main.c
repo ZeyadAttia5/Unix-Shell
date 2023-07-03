@@ -4,52 +4,10 @@
 #include <sys/wait.h>
 #include <string.h>
 #include <stdlib.h>
+#include <fcntl.h>
+#include "file_redirection.h"
 
-#define MAX_LINE 80 /* The maximum length command */
-
-// void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], int *isConcurrent)
-// {
-//     int arg_count = 0;
-//     char *token = strtok(input, " \n");
-//     while (token != NULL)
-//     {
-//         if (strcmp(token, "&") == 0)
-//         {
-//             *isConcurrent = 1;
-//             // args[arg_count] = NULL;
-//         }
-//         else
-//         {
-//             // do not wait for child to return
-//             *isConcurrent = 0;
-//             args[arg_count++] = token;
-//         }
-//         token = strtok(NULL, " \n");
-//     }
-//     args[arg_count] = NULL; /* Set the last element to NULL for execvp() */
-// }
-
-void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], int *isConcurrent)
-{
-    int arg_count = 0;
-    char *token = strtok(input, " \n");
-    while (token != NULL)
-    {
-        if (strcmp(token, "&") == 0)
-        {
-            *isConcurrent = 1;
-            args[arg_count] = NULL; /* Set the last element to NULL for execvp() */
-            break;
-        }
-        else
-        {
-            // do not wait for child to return
-            *isConcurrent = 0;
-            args[arg_count++] = token;
-        }
-        token = strtok(NULL, " \n");
-    }
-}
+void execute_command(char *args[], int parent_child_concurrent);
 
 void copyStringArray(char *destination[], char *source[])
 {
@@ -61,6 +19,13 @@ void copyStringArray(char *destination[], char *source[])
     }
     destination[i] = NULL; // Add NULL termination to the destination array
 }
+
+/*
+    returns:
+     0 for input redirection
+     1 for output redirection
+     -1 no redirection
+*/
 
 int main(void)
 {
@@ -82,6 +47,7 @@ int main(void)
             input[strlen(input) - 1] = '\0';
         /* Tokenize the input into command line arguments */
         tokenize(input, args, &parent_child_concurrent);
+
         if (strcmp(args[0], "!!") == 0)
         {
             if (isHistoryEmpty == 0)
@@ -106,31 +72,90 @@ int main(void)
             isHistoryEmpty = 1;
         }
 
-        pid_t pid = fork();
+        execute_command(args, parent_child_concurrent);
+    }
+    return 0;
+}
 
-        if (pid < 0)
+void execute_command(char *args[], int parent_child_concurrent)
+{
+    pid_t pid = fork();
+
+    if (pid < 0)
+    {
+        perror("error forking");
+    }
+    else if (pid == 0)
+    {
+        /* in child */
+        struct file_redirection *file = (struct file_redirection *)malloc(sizeof(struct file_redirection));
+        isRedirected(args, file);
+
+        switch (file->redirection_type)
         {
-            perror("error forking");
+        case INPUT_REDIRECTION:
+            // input redirection
+            int input_fd  = open(file->file_name, O_RDWR); // Open the source file in read-only mode
+            if (input_fd == -1)
+            {
+                perror("Failed to open source file");
+                exit(1);
+            }
+            dup2(input_fd , STDIN_FILENO);
+            break;
+        case OUTPUT_REDIRECTION:
+            // output redirection
+            int output_fd  = open(file->file_name, O_WRONLY | O_CREAT); // Open the source file in read-only mode
+            if (output_fd == -1)
+            {
+                perror("Failed to open source file");
+                exit(1);
+            }
+            dup2(output_fd, STDOUT_FILENO);
+            break;
+
+        default:
+            break;
         }
-        else if (pid == 0)
+
+        execvp(args[0], args);
+        perror("execvp error"); /* execvp() only returns if an error occurs */
+        exit(1);
+    }
+    else
+    {
+        /* in parent */
+        if (parent_child_concurrent == 1)
         {
-            /* in child */
-            execvp(args[0], args);
-            perror("execvp error"); /* execvp() only returns if an error occurs */
-            return 1;
+            // do not wait for child to return
         }
         else
         {
-            /* in parent */
-            if (parent_child_concurrent == 1)
-            {
-                // do not wait for child to return
-            }
-            else
-            {
-                wait(NULL); // wait for the child to return
-            }
+            wait(NULL); // wait for the child to return
         }
     }
-    return 0;
+}
+
+
+
+void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], int *isConcurrent)
+{
+    int arg_count = 0;
+    char *token = strtok(input, " \n");
+    while (token != NULL)
+    {
+        if (strcmp(token, "&") == 0)
+        {
+            *isConcurrent = 1;
+            args[arg_count] = NULL; /* Set the last element to NULL for execvp() */
+            break;
+        }
+        else
+        {
+            // do not wait for child to return
+            *isConcurrent = 0;
+            args[arg_count++] = token;
+        }
+        token = strtok(NULL, " \n");
+    }
 }
