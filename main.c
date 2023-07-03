@@ -6,35 +6,18 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include "file_redirection.h"
-
-void execute_command(char *args[], int parent_child_concurrent);
-
-void copyStringArray(char *destination[], char *source[])
-{
-    int i = 0;
-    while (source[i] != NULL)
-    {
-        destination[i] = strdup(source[i]);
-        i++;
-    }
-    destination[i] = NULL; // Add NULL termination to the destination array
-}
-
-/*
-    returns:
-     0 for input redirection
-     1 for output redirection
-     -1 no redirection
-*/
+#include "commands.h"
 
 int main(void)
 {
     char input[MAX_LINE];                // buffer to store user input
     char *argsHistory[MAX_LINE / 2 + 1]; /* histoy command line arguments */
     char *args[MAX_LINE / 2 + 1];        /* command line arguments */
+    char *args2[MAX_LINE / 2 + 1];       /* command line arguments for the second command (pipe) */
     int should_run = 1;                  /* flag to determine when to exit program */
     int parent_child_concurrent = 0;     // flag to determine when parent and child should run concurrently
     int isHistoryEmpty = 0;              // flag to determine when history is empty
+    int isPipe = 0;                      // flag to determine when there is a pipe
     while (should_run)
     {
         printf("oscz>");
@@ -46,21 +29,8 @@ int main(void)
         if (input[strlen(input) - 1] == '\n')
             input[strlen(input) - 1] = '\0';
         /* Tokenize the input into command line arguments */
-        tokenize(input, args, &parent_child_concurrent);
+        tokenize(input, args, args2, &parent_child_concurrent, &isPipe);
 
-        if (strcmp(args[0], "!!") == 0)
-        {
-            if (isHistoryEmpty == 0)
-            {
-                printf("No commands in history.");
-                fflush(stdout);
-                continue;
-            }
-            else
-            {
-                copyStringArray(args, argsHistory);
-            }
-        }
         if (strcmp(args[0], "exit") == 0)
         {
             should_run = 0;
@@ -72,12 +42,12 @@ int main(void)
             isHistoryEmpty = 1;
         }
 
-        execute_command(args, parent_child_concurrent);
+        execute_pipeLine(args, args2, parent_child_concurrent, isPipe);
     }
     return 0;
 }
 
-void execute_command(char *args[], int parent_child_concurrent)
+void execute_command(char *args[], int parent_child_concurrent, int fd_in, int fd_out)
 {
     pid_t pid = fork();
 
@@ -88,6 +58,22 @@ void execute_command(char *args[], int parent_child_concurrent)
     else if (pid == 0)
     {
         /* in child */
+
+        // input is from the pipe
+        if (fd_in != STDIN_FILENO)
+        {
+            // redirect to STDIN
+            dup2(fd_in, STDIN_FILENO);
+            close(fd_in);
+        }
+
+        // output to the pipe
+        if (fd_out != STDOUT_FILENO)
+        {
+            // redirect to STDOUT
+            dup2(fd_out, STDOUT_FILENO);
+            close(fd_out);
+        }
         struct file_redirection *file = (struct file_redirection *)malloc(sizeof(struct file_redirection));
         isRedirected(args, file);
 
@@ -106,7 +92,7 @@ void execute_command(char *args[], int parent_child_concurrent)
             break;
         case OUTPUT_REDIRECTION:
             // output redirection
-            int output_fd = open(file->file_name, O_RDWR | O_CREAT, 0644); // Open the source file in read-only mode
+            int output_fd = open(file->file_name, O_WRONLY | O_CREAT, 0644); // Open the source file in read-only mode
             if (output_fd == -1)
             {
                 perror("Failed to open source file");
@@ -139,9 +125,11 @@ void execute_command(char *args[], int parent_child_concurrent)
     }
 }
 
-void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], int *isConcurrent)
+void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], char *args2[MAX_LINE / 2 + 1], int *isConcurrent, int *isPipe)
 {
     int arg_count = 0;
+    *isConcurrent = 0;
+    *isPipe = 0;
     char *token = strtok(input, " \n");
     while (token != NULL)
     {
@@ -151,12 +139,62 @@ void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], int *isConcurr
             args[arg_count] = NULL; /* Set the last element to NULL for execvp() */
             break;
         }
+        else if (strcmp(token, "|") == 0)
+        {
+            *isPipe = 1;
+            token = strtok(NULL, " \n");
+            tokenize(token, args2, NULL, isConcurrent, isPipe);
+            break;
+        }
         else
         {
-            // do not wait for child to return
-            *isConcurrent = 0;
             args[arg_count++] = token;
         }
         token = strtok(NULL, " \n");
+    }
+    if (!*isPipe)
+    {
+        args[arg_count] = NULL;
+    }
+}
+
+void copyStringArray(char *destination[], char *source[])
+{
+    int i = 0;
+    while (source[i] != NULL)
+    {
+        destination[i] = strdup(source[i]);
+        i++;
+    }
+    destination[i] = NULL; // Add NULL termination to the destination array
+}
+
+void execute_pipeLine(char *args[], char *args2[], int isConcurrent, int isPipe)
+{
+
+    if (isPipe == 1)
+    {
+        int pipefd[2];
+        // create pipe
+        if ((pipe(pipefd) == -1))
+        {
+            perror("pipe error");
+            exit(1);
+        }
+        // close read end
+        close(pipefd[0]);
+
+        // execute 1st command
+        execute_command(args, isConcurrent, STDIN_FILENO, pipefd[1]);
+
+        // close write end
+        close(pipefd[1]);
+
+        // execute 2nd command
+        execute_command(args2, isConcurrent, pipefd[0], STDOUT_FILENO);
+    }
+    else
+    {
+        execute_command(args, isConcurrent, STDIN_FILENO, STDOUT_FILENO);
     }
 }
