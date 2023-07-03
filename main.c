@@ -143,6 +143,7 @@ void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], char *args2[MA
         {
             *isPipe = 1;
             token = strtok(NULL, " \n");
+            args[arg_count]=NULL;
             tokenize(token, args2, NULL, isConcurrent, isPipe);
             break;
         }
