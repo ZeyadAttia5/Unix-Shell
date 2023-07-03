@@ -95,18 +95,18 @@ void execute_command(char *args[], int parent_child_concurrent)
         {
         case INPUT_REDIRECTION:
             // input redirection
-            int input_fd  = open(file->file_name, O_RDWR); // Open the source file in read-only mode
+            int input_fd = open(file->file_name, O_RDWR); // Open the source file in read-only mode
             if (input_fd == -1)
             {
                 perror("Failed to open source file");
                 exit(1);
             }
-            dup2(input_fd , STDIN_FILENO);
+            dup2(input_fd, STDIN_FILENO);
             close(input_fd);
             break;
         case OUTPUT_REDIRECTION:
             // output redirection
-            int output_fd  = open(file->file_name, O_RDWR | O_CREAT, 0644); // Open the source file in read-only mode
+            int output_fd = open(file->file_name, O_RDWR | O_CREAT, 0644); // Open the source file in read-only mode
             if (output_fd == -1)
             {
                 perror("Failed to open source file");
@@ -138,7 +138,6 @@ void execute_command(char *args[], int parent_child_concurrent)
         }
     }
 }
-
 
 void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], int *isConcurrent)
 {
