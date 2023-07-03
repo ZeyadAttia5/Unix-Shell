@@ -2,6 +2,13 @@
 
 #include "commands.h"
 #include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <string.h>
+#include <stdlib.h>
+#include <fcntl.h>
 
 #define INPUT_REDIRECTION 0
 #define OUTPUT_REDIRECTION 1
