@@ -36,3 +36,8 @@ void isRedirected(char *args[MAX_LINE / 2 + 1], struct file_redirection *fd)
         i++;
     }
 }
+
+void clearFileRedirection(struct file_redirection *file){
+    free(file->file_name);
+    free(file);
+}

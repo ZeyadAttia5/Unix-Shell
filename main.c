@@ -102,6 +102,7 @@ void execute_command(char *args[], int parent_child_concurrent)
                 exit(1);
             }
             dup2(input_fd , STDIN_FILENO);
+            close(input_fd);
             break;
         case OUTPUT_REDIRECTION:
             // output redirection
@@ -112,12 +113,14 @@ void execute_command(char *args[], int parent_child_concurrent)
                 exit(1);
             }
             dup2(output_fd, STDOUT_FILENO);
+            close(output_fd);
             break;
 
         default:
             break;
         }
 
+        clearFileRedirection(file);
         execvp(args[0], args);
         perror("execvp error"); /* execvp() only returns if an error occurs */
         exit(1);

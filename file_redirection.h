@@ -12,5 +12,6 @@ struct file_redirection
 };
 
 void isRedirected(char *args[MAX_LINE / 2 + 1], struct file_redirection *fd);
+void clearFileRedirection(struct file_redirection *file);
 
 #endif
