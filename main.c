@@ -32,7 +32,7 @@ int main(void) {
         if (strcmp(args[0], "exit") == 0) {
             should_run = 0;
             exit(0);
-        } else if(strcmp(args[0], "!!") != 0) { //does not match
+        } else if (strcmp(args[0], "!!") != 0) { //does not match
             copyStringArray(argsHistory, args);
             isHistoryEmpty = 1;
         }
@@ -48,7 +48,7 @@ int main(void) {
     return 0;
 }
 
-void execute_command(char *args[], int parent_child_concurrent, int fd_in, int fd_out) {
+void execute_command(char *args[], int parent_child_concurrent) {
     pid_t pid = fork();
 
     if (pid < 0) {
@@ -56,19 +56,19 @@ void execute_command(char *args[], int parent_child_concurrent, int fd_in, int f
     } else if (pid == 0) {
         /* in child */
 
-        // input is from the pipe
-        if (fd_in != STDIN_FILENO) {
-            // redirect to STDIN
-            dup2(fd_in, STDIN_FILENO);
-            close(fd_in);
-        }
-
-        // output to the pipe
-        if (fd_out != STDOUT_FILENO) {
-            // redirect to STDOUT
-            dup2(fd_out, STDOUT_FILENO);
-            close(fd_out);
-        }
+//        // input is from the pipe
+//        if (fd_in != STDIN_FILENO) {
+//            // redirect to STDIN
+//            dup2(fd_in, STDIN_FILENO);
+//            close(fd_in);
+//        }
+//
+//        // output to the pipe
+//        if (fd_out != STDOUT_FILENO) {
+//            // redirect to STDOUT
+//            dup2(fd_out, STDOUT_FILENO);
+//            close(fd_out);
+//        }
         struct file_redirection *file = (struct file_redirection *) malloc(sizeof(struct file_redirection));
         isRedirected(args, file);
 
@@ -117,7 +117,7 @@ void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], char *args2[MA
               int *isPipe) {
     int arg_count = 0;
     *isConcurrent = 0;
-    *isPipe = 0;
+    *isPipe ^= 0;
     char *token = strtok(input, " \n");
     while (token != NULL) {
         if (strcmp(token, "&") == 0) {
@@ -127,6 +127,7 @@ void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], char *args2[MA
         } else if (strcmp(token, "|") == 0) {
             *isPipe = 1;
             token = strtok(NULL, " \n");
+            args[arg_count] = NULL;
             tokenize(token, args2, NULL, isConcurrent, isPipe);
             break;
         } else {
@@ -152,23 +153,56 @@ void execute_pipeLine(char *args[], char *args2[], int isConcurrent, int isPipe)
 
     if (isPipe == 1) {
         int pipefd[2];
-        // create pipe
-        if ((pipe(pipefd) == -1)) {
-            perror("pipe error");
-            exit(1);
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork error");
+            exit((1));
+        } else if (pid == 0) {
+            /* child */
+            //execute left command
+
+            close(pipefd[0]); // close read end
+            if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
+                perror("dup2 failed");
+                exit(1);
+            } else {
+                execvp(args[0], args);
+                perror("Left Execution error");
+                exit(1);
+            }
+        } else {
+            /*parent*/
+            /*execute left after child returns*/
+            wait(NULL);
+            close(pipefd[1]);
+            if (dup2(STDIN_FILENO, pipefd[0]) == -1) {
+                perror("dup2 parent failed");
+                exit(1);
+            } else {
+                execvp(args2[0], args);
+                perror("Right Execution error");
+                exit(1);
+
+            }
+
         }
-        // close read end
-        close(pipefd[0]);
-
-        // execute 1st command
-        execute_command(args, isConcurrent, STDIN_FILENO, pipefd[1]);
-
-        // close write end
-        close(pipefd[1]);
-
-        // execute 2nd command
-        execute_command(args2, isConcurrent, pipefd[0], STDOUT_FILENO);
+//        // create pipe
+//        if ((pipe(pipefd) == -1)) {
+//            perror("pipe error");
+//            exit(1);
+//        }
+//        // close read end
+//        close(pipefd[0]);
+//
+//        // execute 1st command
+//        execute_command(args, isConcurrent);
+//
+//        // close write end
+//        close(pipefd[1]);
+//
+//        // execute 2nd command
+//        execute_command(args2, isConcurrent);
     } else {
-        execute_command(args, isConcurrent, STDIN_FILENO, STDOUT_FILENO);
+        execute_command(args, isConcurrent);
     }
 }
