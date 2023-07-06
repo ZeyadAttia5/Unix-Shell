@@ -8,8 +8,11 @@
 #include "file_redirection.h"
 #include "commands.h"
 
-int main(void)
-{
+
+#define READ_END 0
+#define WRITE_END 1
+
+int main(void) {
     char input[MAX_LINE];                // buffer to store user input
     char *argsHistory[MAX_LINE / 2 + 1]; /* histoy command line arguments */
     char *args[MAX_LINE / 2 + 1];        /* command line arguments */
@@ -18,10 +21,10 @@ int main(void)
     int parent_child_concurrent = 0;     // flag to determine when parent and child should run concurrently
     int isHistoryEmpty = 0;              // flag to determine when history is empty
     int isPipe = 0;                      // flag to determine when there is a pipe
-    while (should_run)
-    {
-        printf("oscz>");
+    while (should_run) {
+        printf("oscz> ");
         fflush(stdout);
+        fflush(stdin);
 
         // read user input
         fgets(input, sizeof(input), stdin);
@@ -31,171 +34,124 @@ int main(void)
         /* Tokenize the input into command line arguments */
         tokenize(input, args, args2, &parent_child_concurrent, &isPipe);
 
-        if (strcmp(args[0], "exit") == 0)
-        {
+        if (strcmp(args[0], "exit") == 0) {
             should_run = 0;
             exit(0);
-        }
-        else
-        {
+        } else if (strcmp(args[0], "!!") == 0 && isHistoryEmpty == 1) {
+            execute_command(argsHistory, args2, parent_child_concurrent, &isPipe);
+        } else if (strcmp(args[0], "\n") != 0) {
             copyStringArray(argsHistory, args);
             isHistoryEmpty = 1;
+            execute_command(args, args2, parent_child_concurrent, &isPipe);
         }
-
-        execute_pipeLine(args, args2, parent_child_concurrent, isPipe);
     }
     return 0;
 }
 
-void execute_command(char *args[], int parent_child_concurrent, int fd_in, int fd_out)
-{
-    pid_t pid = fork();
+void execute_command(char *args[], char *args2[], int parent_child_concurrent, int *isPipe) {
 
-    if (pid < 0)
-    {
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("error forking in execute command");
+        exit(1);
+    } else if (pid < 0) {
         perror("error forking");
-    }
-    else if (pid == 0)
-    {
+        exit(1);
+    } else if (pid == 0) {
         /* in child */
 
-        // input is from the pipe
-        if (fd_in != STDIN_FILENO)
-        {
-            // redirect to STDIN
-            dup2(fd_in, STDIN_FILENO);
-            close(fd_in);
-        }
-
-        // output to the pipe
-        if (fd_out != STDOUT_FILENO)
-        {
-            // redirect to STDOUT
-            dup2(fd_out, STDOUT_FILENO);
-            close(fd_out);
-        }
-        struct file_redirection *file = (struct file_redirection *)malloc(sizeof(struct file_redirection));
+        struct file_redirection *file = (struct file_redirection *) malloc(sizeof(struct file_redirection));
         isRedirected(args, file);
 
-        switch (file->redirection_type)
-        {
-        case INPUT_REDIRECTION:
-            // input redirection
-            int input_fd = open(file->file_name, O_RDWR); // Open the source file in read-only mode
-            if (input_fd == -1)
-            {
-                perror("Failed to open source file");
-                exit(1);
-            }
-            dup2(input_fd, STDIN_FILENO);
-            close(input_fd);
-            break;
-        case OUTPUT_REDIRECTION:
-            // output redirection
-            int output_fd = open(file->file_name, O_WRONLY | O_CREAT, 0644); // Open the source file in read-only mode
-            if (output_fd == -1)
-            {
-                perror("Failed to open source file");
-                exit(1);
-            }
-            dup2(output_fd, STDOUT_FILENO);
-            close(output_fd);
-            break;
+        switch (file->redirection_type) {
+            case INPUT_REDIRECTION:
+                // input redirection
+                int input_fd = open(file->file_name, O_RDWR); // Open the source file in read-only mode
+                if (input_fd == -1) {
+                    perror("Failed to open source file");
+                    exit(1);
+                }
+                dup2(input_fd, STDIN_FILENO);
+                close(input_fd);
+                break;
+            case OUTPUT_REDIRECTION:
+                // output redirection
+                int output_fd = open(file->file_name, O_WRONLY | O_CREAT,
+                                     0644); // Open the source file in read-only mode
+                if (output_fd == -1) {
+                    perror("Failed to open source file");
+                    exit(1);
+                }
+                dup2(output_fd, STDOUT_FILENO);
+                close(output_fd);
+                break;
 
-        default:
-            break;
+            default:
+                break;
         }
-
         clearFileRedirection(file);
-        execvp(args[0], args);
-        perror("execvp error"); /* execvp() only returns if an error occurs */
-        exit(1);
-    }
-    else
-    {
-        /* in parent */
-        if (parent_child_concurrent == 1)
-        {
-            // do not wait for child to return
+        if (*isPipe != 0) {
+            *isPipe = 0;
+            execute_pipeLine(args, args2, 0);
+        } else {
+            execvp(args[0], args);
+            perror("execvp error"); /* execvp() only returns if an error occurs */
+            exit(1);
         }
-        else
-        {
+    } else {
+        /* in parent */
+        if (parent_child_concurrent == 1) {
+            // do not wait for child to return
+        } else {
             wait(NULL); // wait for the child to return
         }
     }
 }
 
-void tokenize(char input[MAX_LINE], char *args[MAX_LINE / 2 + 1], char *args2[MAX_LINE / 2 + 1], int *isConcurrent, int *isPipe)
-{
-    int arg_count = 0;
-    *isConcurrent = 0;
-    *isPipe = 0;
-    char *token = strtok(input, " \n");
-    while (token != NULL)
-    {
-        if (strcmp(token, "&") == 0)
-        {
-            *isConcurrent = 1;
-            args[arg_count] = NULL; /* Set the last element to NULL for execvp() */
-            break;
-        }
-        else if (strcmp(token, "|") == 0)
-        {
-            *isPipe = 1;
-            token = strtok(NULL, " \n");
-            args[arg_count]=NULL;
-            tokenize(token, args2, NULL, isConcurrent, isPipe);
-            break;
-        }
-        else
-        {
-            args[arg_count++] = token;
-        }
-        token = strtok(NULL, " \n");
+void execute_pipeLine(char *args[], char *args2[], int isConcurrent) {
+    char write_msg[25];
+    char read_msg[25];
+    int pipe_fd[2];
+    if (pipe(pipe_fd) == -1) {
+        perror("pipe creation failed");
+        exit(1);
     }
-    if (!*isPipe)
-    {
-        args[arg_count] = NULL;
-    }
-}
+    pid_t pid = fork();
 
-void copyStringArray(char *destination[], char *source[])
-{
-    int i = 0;
-    while (source[i] != NULL)
-    {
-        destination[i] = strdup(source[i]);
-        i++;
-    }
-    destination[i] = NULL; // Add NULL termination to the destination array
-}
+    if (pid < 0) {
+        perror("fork failed in execute_pipeline");
+        exit(1);
+    } else if (pid == 0) {
+        /*in child,
+         * read from pipe,
+         * execute the command in args2
+         **/
+        close(pipe_fd[WRITE_END]);
+        dup2(pipe_fd[READ_END], STDIN_FILENO);
+        read(pipe_fd[READ_END], read_msg, sizeof(read_msg));
+        dup2(STDIN_FILENO, 0);
+        printf("%s", read_msg);
+        close(pipe_fd[READ_END]);
+        execvp(args2[0], args2);
+        fflush(stdin);
+        perror("execvp error in execute_pipeline child ");
+        exit(1);
 
-void execute_pipeLine(char *args[], char *args2[], int isConcurrent, int isPipe)
-{
+    } else {
+        /*in parent,
+         * write to pipe,
+         * execute the command in args1
+         **/
+        close(pipe_fd[READ_END]);
+        dup2(pipe_fd[WRITE_END], STDOUT_FILENO);
+        write(pipe_fd[WRITE_END], write_msg, sizeof(write_msg));
+        dup2(STDOUT_FILENO, 1);
+        close(pipe_fd[WRITE_END]);
+        printf("%s", write_msg);
+        execvp(args[0], args);
+        fflush(stdout);
 
-    if (isPipe == 1)
-    {
-        int pipefd[2];
-        // create pipe
-        if ((pipe(pipefd) == -1))
-        {
-            perror("pipe error");
-            exit(1);
-        }
-        // close read end
-        close(pipefd[0]);
-
-        // execute 1st command
-        execute_command(args, isConcurrent, STDIN_FILENO, pipefd[1]);
-
-        // close write end
-        close(pipefd[1]);
-
-        // execute 2nd command
-        execute_command(args2, isConcurrent, pipefd[0], STDOUT_FILENO);
-    }
-    else
-    {
-        execute_command(args, isConcurrent, STDIN_FILENO, STDOUT_FILENO);
+        perror("execvp error in execute_pipeline parent");
+        exit(1);
     }
 }
