@@ -50,14 +50,13 @@ int main(void) {
 
 void execute_command(char *args[], char *args2[], int parent_child_concurrent, int *isPipe) {
 
-    pid_t pid = fork();
-    if (pid < 0) {
+    pid_t pid1, pid2;
+    int status1, status2;
+    pid1 = fork();
+    if (pid1 < 0) {
         perror("error forking in execute command");
         exit(1);
-    } else if (pid < 0) {
-        perror("error forking");
-        exit(1);
-    } else if (pid == 0) {
+    } else if (pid1 == 0) {
         /* in child */
 
         struct file_redirection *file = (struct file_redirection *) malloc(sizeof(struct file_redirection));
@@ -92,13 +91,14 @@ void execute_command(char *args[], char *args2[], int parent_child_concurrent, i
         clearFileRedirection(file);
         if (*isPipe != 0) {
             *isPipe = 0;
-            execute_pipeLine(args, args2, 0);
+            execute_pipeLine(args, args2, parent_child_concurrent);
         } else {
             execvp(args[0], args);
             perror("execvp error"); /* execvp() only returns if an error occurs */
             exit(1);
         }
     } else {
+
         /* in parent */
         if (parent_child_concurrent == 1) {
             // do not wait for child to return
@@ -109,49 +109,52 @@ void execute_command(char *args[], char *args2[], int parent_child_concurrent, i
 }
 
 void execute_pipeLine(char *args[], char *args2[], int isConcurrent) {
-    char write_msg[25];
-    char read_msg[25];
-    int pipe_fd[2];
-    if (pipe(pipe_fd) == -1) {
-        perror("pipe creation failed");
-        exit(1);
+    int pipefd[2];
+    pid_t pid1, pid2;
+    int status1, status2;
+    if (pipe(pipefd) == -1) {
+        perror("pipe");
+        exit(EXIT_FAILURE);
     }
-    pid_t pid = fork();
+    pid1 = fork();
 
-    if (pid < 0) {
-        perror("fork failed in execute_pipeline");
+    if (pid1 < 0) {
+        perror("error forking in execute pipe line");
         exit(1);
-    } else if (pid == 0) {
-        /*in child,
-         * read from pipe,
-         * execute the command in args2
-         **/
-        close(pipe_fd[WRITE_END]);
-        dup2(pipe_fd[READ_END], STDIN_FILENO);
-        read(pipe_fd[READ_END], read_msg, sizeof(read_msg));
-        dup2(STDIN_FILENO, 0);
-        printf("%s", read_msg);
-        close(pipe_fd[READ_END]);
-        execvp(args2[0], args2);
-        fflush(stdin);
-        perror("execvp error in execute_pipeline child ");
-        exit(1);
-
-    } else {
-        /*in parent,
-         * write to pipe,
-         * execute the command in args1
-         **/
-        close(pipe_fd[READ_END]);
-        dup2(pipe_fd[WRITE_END], STDOUT_FILENO);
-        write(pipe_fd[WRITE_END], write_msg, sizeof(write_msg));
-        dup2(STDOUT_FILENO, 1);
-        close(pipe_fd[WRITE_END]);
-        printf("%s", write_msg);
+    } else if (pid1 == 0) {
+        // in child
+        close(pipefd[READ_END]);
+        dup2(pipefd[WRITE_END], STDOUT_FILENO);
+        close(pipefd[WRITE_END]);
         execvp(args[0], args);
-        fflush(stdout);
-
-        perror("execvp error in execute_pipeline parent");
-        exit(1);
+        perror("execvp error");
+        //* execvp() only returns if an error occurs *//*
+                exit(1);
+    } else {
+        // in parent
+        pid2 = fork();
+        if (pid2 < 0) {
+            perror("error forking in execute pipe line");
+            exit(1);
+        } else if (pid2 == 0) {
+            // in child
+            close(pipefd[WRITE_END]);
+            dup2(pipefd[READ_END], STDIN_FILENO);
+            close(pipefd[READ_END]);
+            execvp(args2[0], args2);
+            perror("execvp error");
+            //* execvp() only returns if an error occurs *//*
+                    exit(1);
+        } else {
+            // in parent
+            close(pipefd[READ_END]);
+            close(pipefd[WRITE_END]);
+            if (isConcurrent == 1) {
+                // do not wait for children to return
+            } else {
+                waitpid(pid1, &status1, 0);
+                waitpid(pid2, &status2, 0);
+            }
+        }
     }
 }
