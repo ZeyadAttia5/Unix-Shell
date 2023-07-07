@@ -37,5 +37,6 @@ To get started with the project, follow these steps:
 4. The shell prompt will appear as `oscz>`. Enter commands and press Enter to execute them.
 5. For commands requiring input or output redirection, use the appropriate symbols (`<`, `>`) followed by filenames.
 6. To run commands concurrently, append `&` at the end of the command.
-7. To exit the shell, enter the command `exit`.
+7. To use pipes, separate the first and second commands with a `|`   Ex: `ls -l | less`
+8. To exit the shell, enter the command `exit`.
 
