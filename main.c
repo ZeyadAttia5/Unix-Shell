@@ -11,7 +11,6 @@
 
 
 
-
 int main(void) {
     char input[MAX_LINE];                // buffer to store user input
     char *argsHistory[MAX_LINE / 2 + 1]; /* histoy command line arguments */
